@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/isaaguilar/terraform-operator/monitor/pkg/models"
+	"github.com/isaaguilar/terraform-operator/monitor/pkg/tfohttpclient"
 	"github.com/isaaguilar/terraform-operator/monitor/pkg/util"
 	"gorm.io/gorm"
 )
@@ -37,6 +38,11 @@ func (h handler) GetOrSetCluster(name string) models.Cluster {
 
 func (h handler) GetOrSetTFOResource(uuid, namespace, name, currentGeneration string, cluster models.Cluster) models.TFOResource {
 	// resources := []models.TFOResource{}
+	resourceSpec, err := tfohttpclient.ResourceSpec()
+	if err != nil {
+		// Print err and continue with blank spec
+		log.Printf("ERROR could not read the resource spec: %s", err.Error())
+	}
 	tfoResource := models.TFOResource{}
 	result := h.DB.Where("uuid = ?", uuid).First(&tfoResource)
 	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
@@ -49,6 +55,17 @@ func (h handler) GetOrSetTFOResource(uuid, namespace, name, currentGeneration st
 		}
 
 		createResult := h.DB.Create(&tfoResource)
+		if createResult.Error != nil {
+			log.Panic(createResult.Error)
+		}
+
+		tfoResourceSpec := models.TFOResourceSpec{
+			TFOResourceUUID: uuid,
+			Generation:      currentGeneration,
+			ResourceSpec:    string(resourceSpec),
+		}
+
+		createResult = h.DB.Create(&tfoResourceSpec)
 		if createResult.Error != nil {
 			log.Panic(createResult.Error)
 		}
@@ -70,6 +87,16 @@ func (h handler) GetOrSetTFOResource(uuid, namespace, name, currentGeneration st
 	if tfoResource.CurrentGeneration != currentGeneration {
 		// An updated resource means that the workflow will be started from the beginning
 		tfoResource.CurrentGeneration = currentGeneration
+		tfoResourceSpec := models.TFOResourceSpec{
+			TFOResourceUUID: uuid,
+			Generation:      currentGeneration,
+			ResourceSpec:    string(resourceSpec),
+		}
+
+		createResult := h.DB.Create(&tfoResourceSpec)
+		if createResult.Error != nil {
+			log.Panic(createResult.Error)
+		}
 	}
 	h.DB.Save(&tfoResource)
 	return tfoResource
