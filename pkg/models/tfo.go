@@ -16,6 +16,14 @@ type TFOTaskLog struct {
 	LineNo          string `json:"lineNo"`
 }
 
+type TFOResourceSpec struct {
+	gorm.Model
+	TFOResource     TFOResource
+	TFOResourceUUID string `json:"tfo_resource_uuid"`
+	Generation      string
+	ResourceSpec    string
+}
+
 type TFOResource struct {
 	UUID      string `json:"uuid" gorm:"primaryKey"`
 	CreatedBy string `json:"createdby"`

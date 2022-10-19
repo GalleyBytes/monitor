@@ -62,6 +62,7 @@ func Init() *gorm.DB {
 	if env == "devlocal" {
 		db.AutoMigrate(
 			&models.TFOTaskLog{},
+			&models.TFOResourceSpec{},
 		)
 	}
 	return db
