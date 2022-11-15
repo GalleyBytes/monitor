@@ -1,19 +1,28 @@
 package models
 
-import "gorm.io/gorm"
+import (
+	"time"
 
-type Model struct {
-}
+	"gorm.io/gorm"
+)
 
 type TFOTaskLog struct {
 	gorm.Model
-	TaskType        string `json:"taskType"`
-	Generation      string `json:"generation"`
-	Rerun           int    `json:"rerun"`
-	Message         string `json:"message"`
-	TFOResource     TFOResource
-	TFOResourceUUID string `json:"tfo_resource_uuid"`
-	LineNo          string `json:"lineNo"`
+	TaskPod         TaskPod     `json:"task_pod,omitempty"`
+	TaskPodUUID     string      `json:"task_pod_uuid"`
+	TFOResource     TFOResource `json:"tfo_resource,omitempty"`
+	TFOResourceUUID string      `json:"tfo_resource_uuid"`
+	Message         string      `json:"message"`
+	LineNo          string      `json:"lineNo"`
+}
+
+type TaskPod struct {
+	UUID            string      `json:"uuid" gorm:"primaryKey"`
+	TaskType        string      `json:"task_type"`
+	Rerun           int         `json:"rerun"`
+	Generation      string      `json:"generation"`
+	TFOResource     TFOResource `json:"tfo_resource,omitempty"`
+	TFOResourceUUID string      `json:"tfo_resource_uuid"`
 }
 
 type TFOResourceSpec struct {
@@ -26,12 +35,12 @@ type TFOResourceSpec struct {
 
 type TFOResource struct {
 	UUID      string `json:"uuid" gorm:"primaryKey"`
-	CreatedBy string `json:"createdby"`
-	CreatedAt string `json:"createdat"`
-	UpdatedBy string `json:"updatedby"`
-	UpdatedAt string `json:"updatedat"`
-	DeletedBy string `json:"deletedby"`
-	DeletedAt string `json:"deleetedat"`
+	CreatedBy time.Time
+	CreatedAt time.Time
+	UpdatedBy time.Time
+	UpdatedAt time.Time
+	DeletedBy time.Time
+	DeletedAt time.Time
 
 	// NamespacedName comprises a resource name, with a mandatory namespace,
 	// rendered as "<namespace>/<name>".
@@ -47,4 +56,11 @@ type TFOResource struct {
 type Cluster struct {
 	gorm.Model
 	Name string
+}
+
+type Approval struct {
+	gorm.Model
+	IsApproved  bool    `json:"is_approved"`
+	TaskPod     TaskPod `json:"task_pod,omitempty"`
+	TaskPodUUID string  `json:"task_pod_uuid"`
 }

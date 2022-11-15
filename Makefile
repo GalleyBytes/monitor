@@ -10,7 +10,7 @@ build:
 	docker build . -t ${IMG}
 
 build-local:
-	GOOS=linux GOARCH=amd64 go build -a -installsuffix cgo -o bin//monitor main.go
+	GOOS=linux GOARCH=amd64 go build -a -installsuffix cgo -o bin/monitor main.go
 
 reload-to-kind: build
 	kind load docker-image ${IMG}

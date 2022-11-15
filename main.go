@@ -12,6 +12,7 @@ import (
 	"github.com/fsnotify/fsnotify"
 	"github.com/isaaguilar/terraform-operator/monitor/pkg/handlers"
 	"github.com/isaaguilar/terraform-operator/monitor/pkg/models"
+	gocache "github.com/patrickmn/go-cache"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
@@ -63,6 +64,7 @@ func Init() *gorm.DB {
 		db.AutoMigrate(
 			&models.TFOTaskLog{},
 			&models.TFOResourceSpec{},
+			&models.Approval{},
 		)
 	}
 	return db
@@ -121,8 +123,9 @@ func main() {
 	// 		time.Sleep(time.Second)
 	// 	}
 	// }()
+	cache := gocache.New(gocache.NoExpiration, gocache.NoExpiration)
 	db := Init()
-	h := handlers.New(db)
+	h := handlers.New(db, cache)
 	cluster := h.GetOrSetCluster(clusterName)
 	log.Print("Cluster is ", cluster.Name)
 	tfoResource := h.GetOrSetTFOResource(resourceUUID, resourceNamespace, resourceName, resourceGeneration, cluster)
@@ -153,14 +156,14 @@ func main() {
 	// Read in all files on init
 	for _, fileInfo := range fileInfos {
 		file := filepath.Join(generationsDir, fileInfo.Name())
-		isLog, taskType, rerun, generation := handlers.ParseFile(file)
+		isLog, taskType, rerun, generation, uid := handlers.ParseFile(file)
 		if !isLog {
 			continue
 		}
-		h.EventWriter(file, tfoResource, taskType, generation, rerun)
+		h.EventWriter(file, tfoResource, taskType, generation, rerun, uid)
 	}
 
-	done := make(chan bool)
+	// done := make(chan bool)
 	go func() {
 		for {
 			select {
@@ -181,11 +184,11 @@ func main() {
 					}
 				}
 				if event.Op == fsnotify.Create || event.Op == fsnotify.Write {
-					isLog, taskType, rerun, generation := handlers.ParseFile(event.Name)
+					isLog, taskType, rerun, generation, uid := handlers.ParseFile(event.Name)
 					if !isLog {
 						continue
 					}
-					h.EventWriter(event.Name, tfoResource, taskType, generation, rerun)
+					h.EventWriter(event.Name, tfoResource, taskType, generation, rerun, uid)
 				}
 			case err, ok := <-watcher.Errors:
 				if !ok {
@@ -200,6 +203,18 @@ func main() {
 
 		}
 	}()
-	// Wait until done is returned
-	<-done
+
+	// Start a poll for messages on the approvals model
+	for {
+		items := cache.Items()
+		uids := []string{}
+		for key, _ := range items {
+			uids = append(uids, key)
+		}
+		h.FindApprovals(uids, generationsDir)
+		time.Sleep(15 * time.Second)
+	}
+
+	// // Wait until done is returned.
+	// <-done
 }
