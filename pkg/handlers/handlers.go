@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"os"
 	"path/filepath"
@@ -14,15 +15,21 @@ import (
 	"github.com/isaaguilar/terraform-operator/monitor/pkg/models"
 	"github.com/isaaguilar/terraform-operator/monitor/pkg/tfohttpclient"
 	"github.com/isaaguilar/terraform-operator/monitor/pkg/util"
+	"github.com/patrickmn/go-cache"
+	gocache "github.com/patrickmn/go-cache"
 	"gorm.io/gorm"
 )
 
 type handler struct {
-	DB *gorm.DB
+	DB    *gorm.DB
+	cache *gocache.Cache
 }
 
-func New(db *gorm.DB) handler {
-	return handler{DB: db}
+func New(db *gorm.DB, cache *gocache.Cache) handler {
+	return handler{
+		DB:    db,
+		cache: cache,
+	}
 }
 
 func (h handler) GetOrSetCluster(name string) models.Cluster {
@@ -102,7 +109,7 @@ func (h handler) GetOrSetTFOResource(uuid, namespace, name, currentGeneration st
 	return tfoResource
 }
 
-func (h handler) WriteAllLines(tfoResource models.TFOResource, taskType, generation string, rerun int, tfoTaskLogs []models.TFOTaskLog) {
+func (h handler) WriteAllLines(tfoResource models.TFOResource, taskPod models.TaskPod, tfoTaskLogs []models.TFOTaskLog) {
 	start := time.Now()
 	if len(tfoTaskLogs) == 0 {
 		return
@@ -110,11 +117,9 @@ func (h handler) WriteAllLines(tfoResource models.TFOResource, taskType, generat
 
 	foundTFOTaskLogs := []models.TFOTaskLog{}
 	result := h.DB.Where(models.TFOTaskLog{
-		TaskType:        taskType,
-		Rerun:           rerun,
+		TaskPodUUID:     taskPod.UUID,
 		TFOResourceUUID: tfoResource.UUID,
-		Generation:      generation,
-	}, "task_type", "rerun", "tfo_resource_uuid", "generation").Find(&foundTFOTaskLogs)
+	}, "task_pod_uuid", "tfo_resource_uuid").Find(&foundTFOTaskLogs)
 	if result.Error != nil {
 		log.Panic(result.Error)
 	}
@@ -145,8 +150,33 @@ func (h handler) WriteAllLines(tfoResource models.TFOResource, taskType, generat
 	log.Printf("func WriteAllLines took %s", time.Since(start).String())
 }
 
-func (h handler) EventWriter(file string, tfoResource models.TFOResource, taskType, generation string, rerun int) {
+func (h handler) EventWriter(file string, tfoResource models.TFOResource, taskType, generation string, rerun int, uid string) {
 	// Let's write any .out to the database
+
+	taskPod := models.TaskPod{}
+	if cached, found := h.cache.Get(uid); found {
+		taskPod = cached.(models.TaskPod)
+	} else {
+		result := h.DB.Where("uuid = ?", uid).First(&taskPod)
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			taskPod = models.TaskPod{
+				UUID:        uid,
+				Rerun:       rerun,
+				Generation:  generation,
+				TaskType:    taskType,
+				TFOResource: tfoResource,
+			}
+
+			createResult := h.DB.Create(&taskPod)
+			if createResult.Error != nil {
+				log.Panic(createResult.Error)
+			}
+		} else if result.Error != nil {
+			log.Panic(result.Error)
+		}
+
+		h.cache.Set(uid, taskPod, cache.NoExpiration)
+	}
 
 	f, err := os.Open(file)
 	if err != nil {
@@ -163,23 +193,36 @@ func (h handler) EventWriter(file string, tfoResource models.TFOResource, taskTy
 		i++
 		lines = append(lines, models.TFOTaskLog{
 			Message:     fileScanner.Text(),
-			Generation:  generation,
 			TFOResource: tfoResource,
-			TaskType:    taskType,
-			Rerun:       rerun,
+			TaskPod:     taskPod,
 			LineNo:      fmt.Sprintf("%d", i),
 		})
 	}
 
-	h.WriteAllLines(tfoResource, taskType, generation, rerun, lines)
+	h.WriteAllLines(tfoResource, taskPod, lines)
+}
+
+func (h handler) FindApprovals(uids []string, dir string) {
+	approvals := []models.Approval{}
+	result := h.DB.Find(&approvals, "task_pod_uuid IN ?", uids)
+	if result.Error != nil {
+		log.Println("Error fetching approvals")
+	}
+	for _, approval := range approvals {
+		if approval.IsApproved {
+			ioutil.WriteFile(fmt.Sprintf("%s/_approved_%s", dir, approval.TaskPodUUID), []byte{}, 0644)
+		} else {
+			ioutil.WriteFile(fmt.Sprintf("%s/_canceled_%s", dir, approval.TaskPodUUID), []byte{}, 0644)
+		}
+	}
 }
 
 // ParseFile takes the file path on the filesystem to check that is it a log file and returns the
 // taskType, rerun number, and generation string. Will also return false if it is not a log file
 // or if any of the other three components failed to validate.
-func ParseFile(file string) (bool, string, int, string) {
+func ParseFile(file string) (bool, string, int, string, string) {
 	if filepath.Ext(file) != ".out" {
-		return false, "", 0, ""
+		return false, "", 0, "", ""
 	}
 
 	dir, filename := filepath.Split(file)
@@ -193,12 +236,18 @@ func ParseFile(file string) (bool, string, int, string) {
 		}
 	}
 
+	uid := ""
+	if len(nameSlice) > 3 {
+		// Assuming this is the format <Task>.<rerun>.<uuid>.out
+		uid = nameSlice[2]
+	}
+
 	generation := filepath.Base(dir)
 	_, err := strconv.Atoi(generation)
 	if err != nil {
-		return false, "", 0, ""
+		return false, "", 0, "", ""
 	}
 
-	return true, taskType, rerun, generation
+	return true, taskType, rerun, generation, uid
 
 }
