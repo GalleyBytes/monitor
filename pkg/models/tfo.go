@@ -35,11 +35,11 @@ type TFOResourceSpec struct {
 
 type TFOResource struct {
 	UUID      string `json:"uuid" gorm:"primaryKey"`
-	CreatedBy time.Time
+	CreatedBy string 
 	CreatedAt time.Time
-	UpdatedBy time.Time
+	UpdatedBy string
 	UpdatedAt time.Time
-	DeletedBy time.Time
+	DeletedBy string
 	DeletedAt time.Time
 
 	// NamespacedName comprises a resource name, with a mandatory namespace,
