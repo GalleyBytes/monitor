@@ -15,7 +15,6 @@ import (
 	"github.com/isaaguilar/terraform-operator/monitor/pkg/models"
 	"github.com/isaaguilar/terraform-operator/monitor/pkg/tfohttpclient"
 	"github.com/isaaguilar/terraform-operator/monitor/pkg/util"
-	"github.com/patrickmn/go-cache"
 	gocache "github.com/patrickmn/go-cache"
 	"gorm.io/gorm"
 )
@@ -175,7 +174,7 @@ func (h handler) EventWriter(file string, tfoResource models.TFOResource, taskTy
 			log.Panic(result.Error)
 		}
 
-		h.cache.Set(uid, taskPod, cache.NoExpiration)
+		h.cache.Set(uid, taskPod, gocache.NoExpiration)
 	}
 
 	f, err := os.Open(file)
