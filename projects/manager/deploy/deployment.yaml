@@ -1,0 +1,48 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: monitor-manager
+  namespace: tf-system
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+  selector:
+    matchLabels:
+      app: monitor-manager
+      component: controller
+  template:
+    metadata:
+      labels:
+        app: monitor-manager
+        component: controller
+    spec:
+      serviceAccountName: monitor-manager
+      containers:
+      - name: monitor-manager
+        image: "ghcr.io/galleybytes/monitor-manager:0.0.0"
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: CLUSTER_NAME
+          value: kind-kind
+        - name: DBHOST
+          value: database
+        - name: PGUSER
+          value: pg
+        - name: PGPASSWORD
+          value: pass
+        - name: PGDATABASE
+          value: crud
+        - name: PGPORT
+          value: "5432"
+        resources:
+          limits:
+            cpu: 50m
+            memory: 32M
+          requests:
+            cpu: 5m
+            memory: 32M
+
