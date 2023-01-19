@@ -6,11 +6,15 @@ VERSION := v0.0.0
 endif
 IMG ?= ${DOCKER_REPO}/${IMAGE_NAME}:${VERSION}
 
+MANAGER_DIR = projects/manager
+MUTATING_WEBHOOK_DIR = projects/webhook
+RELEASE_PROJECT = true
+
 build:
 	docker build . -t ${IMG}
 
 build-local:
-	GOOS=linux GOARCH=amd64 go build -a -installsuffix cgo -o bin/monitor main.go
+	GOOS=linux GOARCH=amd64 go build -v -installsuffix cgo -o bin/monitor main.go
 
 reload-to-kind: build
 	kind load docker-image ${IMG}
@@ -18,4 +22,14 @@ reload-to-kind: build
 release: build
 	docker push ${IMG}
 
-.PHONY: build build-local reload-to-kind release
+ghactions-release:
+	go build -v -installsuffix cgo -o bin/monitor main.go
+	docker build . -t ${IMG}
+	docker push ${IMG}
+
+projects:
+	RELEASE_PROJECT=true ${MUTATING_WEBHOOK_DIR}/release.sh
+	RELEASE_PROJECT=true ${MANAGER_DIR}/release.sh
+
+
+.PHONY: build build-local reload-to-kind release projects

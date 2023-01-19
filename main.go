@@ -10,65 +10,21 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
-	"github.com/isaaguilar/terraform-operator/monitor/pkg/handlers"
-	"github.com/isaaguilar/terraform-operator/monitor/pkg/models"
+	"github.com/galleybytes/monitor/pkg/handlers"
 	gocache "github.com/patrickmn/go-cache"
-	"gorm.io/driver/postgres"
-	"gorm.io/gorm"
 )
 
 var (
-	watcher            *fsnotify.Watcher
 	err                error
+	watcher            *fsnotify.Watcher
 	clusterName        string
 	resourceUUID       string
 	resourceName       string
 	resourceNamespace  string
 	resourceGeneration string
 	generationsDir     string
-	pgpassword         string
-	pguser             string
-	pgdb               string
-	pghost             string
-	pgport             string
-	env                string
+	managerServiceHost string
 )
-
-func Init() *gorm.DB {
-
-	env = os.Getenv("ENV")
-	pgpassword = os.Getenv("PGPASSWORD")
-	pguser = os.Getenv("PGUSER")
-	pgdb = os.Getenv("PGDATABASE")
-	pgport = os.Getenv("PGPORT")
-	if pgport == "" {
-		pgport = "5432"
-	}
-	pghost = os.Getenv("DBHOST")
-	if pghost == "" {
-		pghost = "localhost"
-	}
-
-	// There are two ways of using creds. The connection string and the dsn
-	// dsn := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%s sslmode=disable", pghost, pguser, pgpassword, pgdb, pgport)
-	dbURL := fmt.Sprintf("postgres://%s:%s@%s:%s/%s", pguser, pgpassword, pghost, pgport, pgdb)
-
-	db, err := gorm.Open(postgres.Open(dbURL), &gorm.Config{})
-	if err != nil {
-		log.Panic(err)
-	}
-
-	// Do not migrate when running this service. The owner of the models (which will not be this monitor)
-	// will be responsible for database migrations.
-	if env == "devlocal" {
-		db.AutoMigrate(
-			&models.TFOTaskLog{},
-			&models.TFOResourceSpec{},
-			&models.Approval{},
-		)
-	}
-	return db
-}
 
 // addWatcher adds files under the generation dir
 func addWatcher(fileInfo fs.FileInfo, path string) {
@@ -81,6 +37,11 @@ func addWatcher(fileInfo fs.FileInfo, path string) {
 }
 
 func init() {
+	managerServiceHost = os.Getenv("MONITOR_MANAGER_SERVICE_HOST")
+	if managerServiceHost == "" {
+		log.Fatal("MONITOR_MANAGER_SERVICE_HOST cannot be empty")
+	}
+
 	clusterName = os.Getenv("CLUSTER_NAME")
 	if clusterName == "" {
 		log.Fatal("CLUSTER_NAME cannot be empty")
@@ -124,11 +85,10 @@ func main() {
 	// 	}
 	// }()
 	cache := gocache.New(gocache.NoExpiration, gocache.NoExpiration)
-	db := Init()
-	h := handlers.New(db, cache)
-	cluster := h.GetOrSetCluster(clusterName)
-	log.Print("Cluster is ", cluster.Name)
-	tfoResource := h.GetOrSetTFOResource(resourceUUID, resourceNamespace, resourceName, resourceGeneration, cluster)
+	requestHandler := handlers.New(managerServiceHost+"/api-token-please", cache)
+
+	cluster := requestHandler.GetOrSetCluster(clusterName)
+	tfoResource := requestHandler.GetOrSetTFOResource(resourceUUID, resourceNamespace, resourceName, resourceGeneration, *cluster)
 	log.Print("TFO Resource is ", tfoResource.Namespace, "/", tfoResource.Name, ", UUID:", tfoResource.UUID)
 	watcher, err = fsnotify.NewWatcher()
 	if err != nil {
@@ -136,6 +96,7 @@ func main() {
 	}
 	defer watcher.Close()
 
+	log.Print("Finding files")
 	for {
 		fileInfo, err := os.Stat(generationsDir)
 		if err == nil {
@@ -160,9 +121,9 @@ func main() {
 		if !isLog {
 			continue
 		}
-		h.EventWriter(file, tfoResource, taskType, generation, rerun, uid)
+		requestHandler.EventWriter(file, tfoResource, taskType, generation, rerun, uid)
 	}
-
+	log.Print("Starting log watcher")
 	// done := make(chan bool)
 	go func() {
 		for {
@@ -188,7 +149,7 @@ func main() {
 					if !isLog {
 						continue
 					}
-					h.EventWriter(event.Name, tfoResource, taskType, generation, rerun, uid)
+					requestHandler.EventWriter(event.Name, tfoResource, taskType, generation, rerun, uid)
 				}
 			case err, ok := <-watcher.Errors:
 				if !ok {
@@ -205,13 +166,14 @@ func main() {
 	}()
 
 	// Start a poll for messages on the approvals model
+	log.Println("Starting approval watcher")
 	for {
 		items := cache.Items()
 		uids := []string{}
 		for key, _ := range items {
 			uids = append(uids, key)
 		}
-		h.FindApprovals(uids, generationsDir)
+		requestHandler.FindApprovals(uids, generationsDir)
 		time.Sleep(15 * time.Second)
 	}
 
