@@ -1,8 +1,8 @@
 DOCKER_REPO ?= ghcr.io/galleybytes
 IMAGE_NAME ?= monitor
-VERSION ?= $(shell  git describe --tags --dirty)
+VERSION ?= $(shell  git describe --tags --dirty --match 'monitor-*'|sed s,monitor-,,)
 ifeq ($(VERSION),)
-VERSION := v0.0.0
+VERSION := 0.0.0
 endif
 IMG ?= ${DOCKER_REPO}/${IMAGE_NAME}:${VERSION}
 
