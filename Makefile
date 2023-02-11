@@ -23,7 +23,7 @@ release: build
 	docker push ${IMG}
 
 ghactions-release:
-	go build -v -installsuffix cgo -o bin/monitor main.go
+	CGO_ENABLED=0 go build -v -o bin/monitor main.go
 	docker build . -t ${IMG}
 	docker push ${IMG}
 
