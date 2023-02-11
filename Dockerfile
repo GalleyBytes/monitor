@@ -9,7 +9,7 @@
 # COPY --from=go /monitor /monitor
 # ENTRYPOINT [ "/monitor" ]
 
-FROM scratch
+FROM alpine
 COPY bin/monitor /monitor
 ENTRYPOINT [ "/monitor" ]
 LABEL org.opencontainers.image.source https://github.com/galleybytes/monitor
