@@ -170,7 +170,7 @@ func fnTFOTaskLogs(arr interface{}) (interface{}, error) {
 	return obj, nil
 }
 
-func fnApprovalResponse(arr interface{}) (interface{}, error) {
+func fnApprovalStatusResponse(arr interface{}) (interface{}, error) {
 	i := arr.([]interface{})
 	if len(i) == 0 {
 		return nil, fmt.Errorf("did not contain data")
@@ -179,12 +179,12 @@ func fnApprovalResponse(arr interface{}) (interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
-	var approval models.Approval
-	err = json.Unmarshal(b, &approval)
+	var approvalStatus ApprovalStatus
+	err = json.Unmarshal(b, &approvalStatus)
 	if err != nil {
 		return nil, err
 	}
-	return approval, nil
+	return approvalStatus, nil
 }
 
 func fnAnyContent(n interface{}) (interface{}, error) {
@@ -574,12 +574,17 @@ func (h handler) EventWriter(file string, tfoResource models.TFOResource, taskTy
 	h.WriteAllLines(tfoResource, taskPod, lines)
 }
 
+type ApprovalStatus = struct {
+	models.Approval `json:",inline"`
+	Status          string `json:"status"`
+}
+
 // FindApprovals checks logs by the task_log_uuid for approval statuses in the database. When approved, a file
 // is created using a specific naming convention.
 // See https://github.com/GalleyBytes/terraform-operator-tasks/commit/7b2ab6813696def5ca806de9fe52b09a164de6fb
 func (h handler) FindApprovals(uids []string, dir string) {
 
-	approvals := []models.Approval{}
+	approvalStatuses := []ApprovalStatus{}
 	for _, uid := range uids {
 		url := fmt.Sprintf("%s/api/v1/task/%s/approval-status", h.host, uid)
 		request, err := http.NewRequest("GET", url, bytes.NewBuffer([]byte{}))
@@ -587,7 +592,7 @@ func (h handler) FindApprovals(uids []string, dir string) {
 			log.Panic(err)
 		}
 
-		approval, found, _, err := h.doRequest(request, fnApprovalResponse)
+		untypedApprovalStatus, found, _, err := h.doRequest(request, fnApprovalStatusResponse)
 		if err != nil {
 			log.Panic(err)
 		}
@@ -595,24 +600,31 @@ func (h handler) FindApprovals(uids []string, dir string) {
 			log.Panic("Type 'bool' was expected but got 'nil'")
 		}
 		if !*found {
-			// The uid has not been registered, status is undefined. This is ok and is probably the most seen
-			// case. Typically an undefined approval status means that an approval was not required or
-			// is yet to be decided.
-			// log.Println(m)
+			// TODO Should panic because the response should always have something
 			continue
 		}
-		approvals = append(approvals, approval.(models.Approval))
+		approvalStatus := untypedApprovalStatus.(ApprovalStatus)
+		if approvalStatus.Status == "nodata" {
+			continue
+		}
+		approvalStatuses = append(approvalStatuses, approvalStatus)
 	}
 
 	result := struct{ Error error }{}
 	if result.Error != nil {
 		log.Println("Error fetching approvals")
 	}
-	for _, approval := range approvals {
+	for _, approval := range approvalStatuses {
 		if approval.IsApproved {
-			ioutil.WriteFile(fmt.Sprintf("%s/_approved_%s", dir, approval.TaskPodUUID), []byte{}, 0644)
+			approveFilename := fmt.Sprintf("%s/_approved_%s", dir, approval.TaskPodUUID)
+			if _, err := os.Stat(approveFilename); err != nil {
+				ioutil.WriteFile(approveFilename, []byte{}, 0644)
+			}
 		} else {
-			ioutil.WriteFile(fmt.Sprintf("%s/_canceled_%s", dir, approval.TaskPodUUID), []byte{}, 0644)
+			cancelFilename := fmt.Sprintf("%s/_canceled_%s", dir, approval.TaskPodUUID)
+			if _, err := os.Stat(cancelFilename); err != nil {
+				ioutil.WriteFile(cancelFilename, []byte{}, 0644)
+			}
 		}
 	}
 }
