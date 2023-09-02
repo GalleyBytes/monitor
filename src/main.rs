@@ -1,23 +1,15 @@
-use std::env::consts::OS;
-use std::io::{Error, ErrorKind};
+
 use std::io::prelude::*;
-use std::io::BufReader;
+use std::io::{Error, ErrorKind};
 use std::fs::File;
 use std::path::Path;
-use std::{thread, os, env};
-use std::sync::mpsc::channel;
-use std::sync::mpsc::sync_channel;
+use std::{thread, env};
 use std::time::Duration;
-use std::slice::Iter;
 use std::str::Chars;
-// use regex::Regex;
 use std::collections::HashMap;
 
-
-
 use notify::Event;
-use notify::event::MetadataKind;
-use notify::{Watcher, RecommendedWatcher, RecursiveMode};
+use notify::{Watcher, RecursiveMode};
 
 
 #[derive(Debug)]
@@ -140,8 +132,7 @@ fn is_valid_uuid(uuid: &str) -> bool {
         } else {
             for (index, &item) in uuid_items.iter().enumerate() {
                 // UUID format is 8-4-4-4-12 chars + alphanumeric
-                let mut is_correct_chars =  true;
-                is_correct_chars = match index {
+                let is_correct_chars = match index {
                     0 => item.chars().count() == 8 && is_all_alphanumeric(item.chars()),
                     1 => item.chars().count() == 4 && is_all_alphanumeric(item.chars()),
                     2 => item.chars().count() == 4 && is_all_alphanumeric(item.chars()),
@@ -194,7 +185,11 @@ fn post_on_event(event: Event, url: &str) {
     println!("File: {}\nuuid: {}", file_handler.filepath(), file_handler.uuid());
     println!("-CONTENT-\n{}",file_handler.conent());
 
-    file_handler.upload(url);
+    let upload_result = file_handler.upload(url);
+    if upload_result.is_err() {
+        println!("File: {}, Error:{:?}", filepath, upload_result.unwrap_err());
+        return
+    }
 
 }
 
